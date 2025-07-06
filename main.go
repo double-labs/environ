@@ -3,7 +3,6 @@ package main
 import (
 	"archive/zip"
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"cloud.google.com/go/storage"
 	"github.com/peter-evans/patience"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
@@ -46,53 +44,6 @@ var (
 	}
 	environs = map[string]Environ{}
 )
-
-func gcs(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	bucket := ""
-	prefix := ""
-	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, "bucket", &bucket, "prefix?", &prefix); err != nil {
-		return nil, err
-	}
-	if prefix == "" {
-		prefix = "environ"
-	}
-	client, err := storage.NewClient(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	return GCS{
-		client: client,
-		bucket: bucket,
-		prefix: prefix,
-	}, nil
-}
-
-func local(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	path := ""
-	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, "path", &path); err != nil {
-		return nil, err
-	}
-	if strings.HasPrefix(path, "~/") {
-		path = filepath.Join(os.Getenv("HOME"), path[2:])
-	}
-	if err := os.MkdirAll(path, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", path, err)
-	}
-	return Local{
-		path: path,
-	}, nil
-}
-
-func cache(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var of, by Remote
-	if err := starlark.UnpackArgs(fn.Name(), args, kwargs, "of", &of, "by", &by); err != nil {
-		return nil, err
-	}
-	return Cache{
-		Of: of,
-		By: by,
-	}, nil
-}
 
 func environ(thread *starlark.Thread, fn *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var name, ref string
@@ -273,7 +224,7 @@ func push(environ Environ) error {
 		return fmt.Errorf("failed to update ref file: %w", err)
 	}
 
-	log.Printf("Pushed %d files to %s", len(environ.Files), key)
+	log.Printf("Pushed %d files to %s as %s", len(environ.Files), environ.String(), key)
 	return nil
 }
 
@@ -419,6 +370,7 @@ func main() {
 
 	globals := starlark.StringDict{
 		"gcs":     starlark.NewBuiltin("gcs", gcs),
+		"s3":      starlark.NewBuiltin("s3", s3func),
 		"local":   starlark.NewBuiltin("local", local),
 		"cache":   starlark.NewBuiltin("cache", cache),
 		"environ": starlark.NewBuiltin("environ", environ),
